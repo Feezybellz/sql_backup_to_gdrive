@@ -180,10 +180,13 @@ def cmd_navigate(args, auth):
             is_dir = item["mimeType"] == "application/vnd.google-apps.folder"
             print(f"{idx+1:<3} {'[DIR]' if is_dir else '[FILE]':<7} {item['id']:<35} {item['name']}")
         
-        print("\nCommands: [Number] to enter, 'del [Number]' to delete, '..' up, 'q' quit")
-        cmd_input = input("Select action: ").strip()
+        print("\nCommands: [Number] to enter, 'del [Number]' to delete, 'usage' to see quota, '..' up, 'q' quit")
+        cmd_input = input("Select action: ").strip().lower()
         
         if cmd_input == 'q': break
+        elif cmd_input == 'usage':
+            cmd_usage(args, auth)
+            input("\nPress Enter to continue...")
         elif cmd_input == '..':
             if stack: current_id = stack.pop()
         elif cmd_input.startswith("del "):
