@@ -180,17 +180,39 @@ def cmd_navigate(args, auth):
             is_dir = item["mimeType"] == "application/vnd.google-apps.folder"
             print(f"{idx+1:<3} {'[DIR]' if is_dir else '[FILE]':<7} {item['id']:<35} {item['name']}")
         
-        print("\nCommands: [Number] to enter, '..' up, 'q' quit")
-        cmd = input("Select action: ").strip()
+        print("\nCommands: [Number] to enter, 'del [Number]' to delete, '..' up, 'q' quit")
+        cmd_input = input("Select action: ").strip()
         
-        if cmd == 'q': break
-        elif cmd == '..':
+        if cmd_input == 'q': break
+        elif cmd_input == '..':
             if stack: current_id = stack.pop()
-        elif cmd.isdigit():
-            idx = int(cmd) - 1
+        elif cmd_input.startswith("del "):
+            try:
+                idx = int(cmd_input.split(" ")[1]) - 1
+                if 0 <= idx < len(items):
+                    item = items[idx]
+                    confirm = input(f"Are you sure you want to DELETE '{item['name']}' ({item['id']})? [y/N]: ").strip().lower()
+                    if confirm == 'y':
+                        token = auth.get_access_token()
+                        res = requests.delete(f"https://www.googleapis.com/drive/v3/files/{item['id']}",
+                                            headers={"Authorization": f"Bearer {token}"})
+                        if res.status_code == 204:
+                            print(f"Successfully deleted {item['name']}.")
+                        else:
+                            print(f"Delete failed: {res.text}")
+                else:
+                    print("Invalid number.")
+            except (ValueError, IndexError):
+                print("Usage: del [Number]")
+        elif cmd_input.isdigit():
+            idx = int(cmd_input) - 1
             if 0 <= idx < len(items) and items[idx]["mimeType"] == "application/vnd.google-apps.folder":
                 stack.append(current_id)
                 current_id = items[idx]["id"]
+            elif 0 <= idx < len(items):
+                print(f"\n[INFO] You selected a file: {items[idx]['name']}")
+                print(f"       ID: {items[idx]['id']}")
+                input("Press Enter to continue...")
 
 def cmd_backup(args, auth):
     logging.info("Backup started.")
