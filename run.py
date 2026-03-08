@@ -250,6 +250,9 @@ def main():
     # Navigate Command
     subparsers.add_parser("navigate", help="Interactive GDrive navigator")
     
+    # Cron Setup Command
+    subparsers.add_parser("cron-setup", help="Interactive cron job generator")
+    
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -260,6 +263,58 @@ def main():
     if args.command == "backup": cmd_backup(args, auth)
     elif args.command == "usage": cmd_usage(args, auth)
     elif args.command == "navigate": cmd_navigate(args, auth)
+    elif args.command == "cron-setup": cmd_cron_setup()
+
+def cmd_cron_setup():
+    print("\n--- Interactive Cron Setup ---")
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 1. Environment Detection
+    venv_python = os.path.join(current_dir, "venv", "bin", "python3")
+    use_venv = "n"
+    if os.path.exists(venv_python):
+        use_venv = input(f"Detected venv at {venv_python}. Use it? [Y/n]: ").strip().lower() or "y"
+    
+    python_path = venv_python if use_venv == "y" else sys.executable
+    
+    # 2. Schedule Selection
+    print("\nSelect Backup Schedule:")
+    print("1) Daily (at a specific time)")
+    print("2) Every 12 Hours")
+    print("3) Every 6 Hours")
+    print("4) Weekly")
+    print("5) Custom Cron Expression")
+    
+    choice = input("\nChoice [1-5]: ").strip()
+    
+    schedule = "0 0 * * *" # Default daily midnight
+    
+    if choice == "1":
+        time_str = input("At what time? (HH:MM, e.g. 02:30): ").strip() or "00:00"
+        try:
+            h, m = time_str.split(":")
+            schedule = f"{int(m)} {int(h)} * * *"
+        except:
+            print("Invalid format, defaulting to midnight.")
+    elif choice == "2": schedule = "0 */12 * * *"
+    elif choice == "3": schedule = "0 */6 * * *"
+    elif choice == "4": schedule = "0 0 * * 0"
+    elif choice == "5":
+        schedule = input("Enter custom cron (e.g. '*/30 * * * *'): ").strip()
+    
+    # 3. Generate Command
+    log_path = os.path.join(current_dir, "logs", "cron.log")
+    full_cmd = f"{schedule} cd {current_dir} && {python_path} run.py backup >> {log_path} 2>&1"
+    
+    print("\n" + "="*80)
+    print(" YOUR CRONTAB COMMAND:")
+    print("="*80)
+    print(full_cmd)
+    print("="*80)
+    print("\nTo install this:")
+    print("1. Copy the line above.")
+    print("2. Run: crontab -e")
+    print("3. Paste the line at the bottom and save.")
 
 if __name__ == "__main__":
     main()

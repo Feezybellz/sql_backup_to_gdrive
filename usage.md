@@ -9,10 +9,28 @@ A multi-purpose CLI utility for automated MySQL backups to Google Drive, storage
 ### Prerequisites
 - **Python 3.8+**
 - **MySQL Client:** `mysql` and `mysqldump` must be accessible in your system PATH.
-- **Dependencies:** Install required libraries:
-  ```bash
-  pip install -r requirements.txt
-  ```
+
+### Choose Your Installation Method
+
+#### Option A: Virtual Environment (Recommended)
+This keeps dependencies isolated from your system Python.
+1. **Create & Activate:**
+   ```bash
+   cd /home/feezybellz/server/scripts/sql_backup
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+2. **Install:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+#### Option B: Global Installation
+Useful if you prefer to manage libraries system-wide.
+1. **Install directly:**
+   ```bash
+   pip3 install -r requirements.txt
+   ```
 
 ### File Permissions (Security)
 For security, ensure your configuration files are only readable by your user:
@@ -49,11 +67,6 @@ Global options apply to **all** commands and must be placed **before** the subco
 | :--- | :--- | :--- |
 | `--acctJson` | `acct.json` (local) | Path to your Google Service Account JSON key. |
 
-**Example:**
-```bash
-python3 run.py --acctJson /custom/path/client_key.json usage
-```
-
 ---
 
 ## 4. Subcommands & Details
@@ -71,11 +84,11 @@ Performs a full dump of all non-system databases, compresses them, and uploads t
 
 **Example Usage:**
 ```bash
-# Run with defaults (uses local backups folder and acct.json)
-python3 run.py backup
+# Using venv:
+./venv/bin/python3 run.py backup
 
-# Run with custom database and storage path
-python3 run.py backup --db-user admin --backup-path /tmp/sql_dumps
+# Using Global Python:
+python3 run.py backup
 ```
 
 ---
@@ -85,17 +98,12 @@ Generates a real-time report of your Google Drive storage quota.
 
 **Example Usage:**
 ```bash
-# Check usage for default account
-python3 run.py usage
+# Using venv:
+./venv/bin/python3 run.py usage
 
-# Check usage for a specific client account
-python3 run.py --acctJson client_b.json usage
+# Using Global Python:
+python3 run.py usage
 ```
-**Output Includes:**
-- Account Email
-- Total Quota (Limit)
-- Used Space (Bytes and Percentage)
-- Visual Progress Bar
 
 ---
 
@@ -105,36 +113,44 @@ An interactive terminal-based browser for your Google Drive files and folders.
 **Example Usage:**
 ```bash
 python3 run.py navigate
-
-# Navigate a different account's drive
-python3 run.py --acctJson private_key.json navigate
 ```
-**Controls:**
-- **[Number]:** Enter the folder corresponding to that index.
-- **`..`**: Navigate back to the parent folder.
-- **`q`**: Exit the navigator.
+
+---
+
+### D. `cron-setup`
+An interactive tool that generates the exact crontab line for you based on your current folder and environment.
+
+**Example Usage:**
+```bash
+python3 run.py cron-setup
+```
+**Features:**
+- **Environment Detection:** Automatically detects if you are using a `venv`.
+- **Presets:** Choose from Daily, Weekly, or Hourly schedules.
+- **Customization:** Enter specific times (e.g., `02:30`) or custom cron expressions.
 
 ---
 
 ## 5. Automation (Cron Job)
 
-When using `cron`, always use absolute paths and the specific `backup` command. You can pass any flags to override defaults specifically for the automated task.
+The easiest way to set up automation is to use the built-in generator:
 
-### Simple Setup (Uses .env defaults):
-```bash
-0 0 * * * cd /home/feezybellz/server/scripts/sql_backup && /usr/bin/python3 run.py backup >> /home/feezybellz/server/scripts/sql_backup/logs/cron.log 2>&1
-```
+1.  Run the setup tool:
+    ```bash
+    python3 run.py cron-setup
+    ```
+2.  Follow the prompts to select your schedule.
+3.  Copy the generated line (e.g., `0 0 * * * cd /path/to/tool && ./venv/bin/python3 run.py backup...`).
+4.  Open your crontab: `crontab -e`.
+5.  Paste the line at the bottom and save.
 
-### Advanced Setup (Specific Account & Path):
-```bash
-0 0 * * * cd /home/feezybellz/server/scripts/sql_backup && /usr/bin/python3 run.py --acctJson client_vps.json backup --backup-path /mnt/storage/tmp >> /home/feezybellz/server/scripts/sql_backup/logs/cron.log 2>&1
-```
+### Manual Setup (Reference)
+If you prefer manual setup, always use the **absolute path** to your Python executable.
 
 ---
 
 ## 6. Logging & Troubleshooting
 
-- **`logs/backup.log`**: Contains application-level logs (backup start/stop, upload success/failure, API errors).
-- **`logs/cron.log`**: (If set in crontab) Contains system-level errors (Python crashes, path errors).
-- **Rate Limits:** The tool includes built-in exponential backoff for Google Drive "User Rate Limit Exceeded" errors.
+- **`logs/backup.log`**: Detailed application logs.
+- **`logs/cron.log`**: System-level errors.
 - **Process Security:** Databases are backed up using a temporary config file to prevent passwords from leaking into `ps aux`.
