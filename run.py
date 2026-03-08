@@ -23,7 +23,7 @@ DEFAULT_DB_USER = os.getenv("DB_USER", "root")
 DEFAULT_DB_PASSWORD = os.getenv("DB_PASSWORD", "Password")
 DEFAULT_BACKUP_PATH = os.getenv("BACKUP_PATH", os.path.join(current_dir, "backups"))
 DEFAULT_SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", os.path.join(current_dir, "acct.json"))
-DEFAULT_GDRIVE_FOLDER = os.getenv("PARENT_GDRIVE_FOLDER_NAME", "db_backups")
+DEFAULT_GDRIVE_FOLDER = os.getenv("PARENT_GDRIVE_FOLDER_NAME", "mckodev/mckodev_server_db")
 DEFAULT_EMAILS = [e.strip() for e in os.getenv("EMAILS_TO_SHARE", "").split(",") if e.strip()]
 
 # Setup Logging
@@ -108,12 +108,36 @@ def retry_request(func, max_retries=5, base_delay=5):
 
 def get_folder_contents(auth, folder_id):
     token = auth.get_access_token()
-    query = urllib.parse.quote(f"'{folder_id}' in parents and trashed=false")
-    res = requests.get(
-        f"https://www.googleapis.com/drive/v3/files?q={query}&fields=files(id,name,mimeType,size)&orderBy=folder,name",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    return res.json().get("files", []) if res.status_code == 200 else []
+    all_files = []
+    page_token = None
+    while True:
+        query = urllib.parse.quote(f"'{folder_id}' in parents and trashed=false")
+        url = f"https://www.googleapis.com/drive/v3/files?q={query}&fields=nextPageToken,files(id,name,mimeType,size)&orderBy=folder,name&pageSize=1000"
+        if page_token:
+            url += f"&pageToken={page_token}"
+        
+        res = requests.get(url, headers={"Authorization": f"Bearer {token}"})
+        if res.status_code != 200:
+            break
+        data = res.json()
+        all_files.extend(data.get("files", []))
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return all_files
+
+def get_recursive_size(auth, folder_id):
+    total_size = 0
+    stack = [folder_id]
+    while stack:
+        fid = stack.pop()
+        items = get_folder_contents(auth, fid)
+        for item in items:
+            if item["mimeType"] == "application/vnd.google-apps.folder":
+                stack.append(item["id"])
+            else:
+                total_size += int(item.get("size", 0))
+    return total_size
 
 def create_or_get_folder(auth, name, parent_id):
     token = auth.get_access_token()
@@ -180,13 +204,30 @@ def cmd_navigate(args, auth):
             is_dir = item["mimeType"] == "application/vnd.google-apps.folder"
             print(f"{idx+1:<3} {'[DIR]' if is_dir else '[FILE]':<7} {item['id']:<35} {item['name']}")
         
-        print("\nCommands: [Number] to enter, 'del [Number]' to delete, 'usage' to see quota, '..' up, 'q' quit")
+        print("\nCommands: [Number] enter, 'usage' quota, 'usage [Number]' item size, 'del [Number]' delete, '..' up, 'q' quit")
         cmd_input = input("Select action: ").strip().lower()
         
         if cmd_input == 'q': break
         elif cmd_input == 'usage':
             cmd_usage(args, auth)
             input("\nPress Enter to continue...")
+        elif cmd_input.startswith("usage "):
+            try:
+                idx = int(cmd_input.split(" ")[1]) - 1
+                if 0 <= idx < len(items):
+                    item = items[idx]
+                    if item["mimeType"] == "application/vnd.google-apps.folder":
+                        print(f"Calculating size for folder '{item['name']}'...")
+                        size = get_recursive_size(auth, item["id"])
+                        print(f"Total Folder Size: {format_size(size)}")
+                    else:
+                        size = int(item.get("size", 0))
+                        print(f"File Size: {format_size(size)}")
+                    input("\nPress Enter to continue...")
+                else:
+                    print("Invalid number.")
+            except (ValueError, IndexError):
+                print("Usage: usage [Number]")
         elif cmd_input == '..':
             if stack: current_id = stack.pop()
         elif cmd_input.startswith("del "):
@@ -254,42 +295,6 @@ def cmd_backup(args, auth):
                 if os.path.exists(filepath): os.remove(filepath)
     logging.info("Backup complete.")
 
-# --- Main Entry ---
-
-def main():
-    parser = argparse.ArgumentParser(description="Mckodev GDrive SQL Tool")
-    parser.add_argument("--acctJson", default=DEFAULT_SERVICE_ACCOUNT_FILE, help="Path to service account JSON")
-    
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
-    # Backup Command
-    p_backup = subparsers.add_parser("backup", help="Run database backup")
-    p_backup.add_argument("--db-user", default=DEFAULT_DB_USER)
-    p_backup.add_argument("--db-password", default=DEFAULT_DB_PASSWORD)
-    p_backup.add_argument("--backup-path", default=DEFAULT_BACKUP_PATH)
-    p_backup.add_argument("--gdrive-folder", default=DEFAULT_GDRIVE_FOLDER)
-    
-    # Usage Command
-    subparsers.add_parser("usage", help="Check GDrive quota usage")
-    
-    # Navigate Command
-    subparsers.add_parser("navigate", help="Interactive GDrive navigator")
-    
-    # Cron Setup Command
-    subparsers.add_parser("cron-setup", help="Interactive cron job generator")
-    
-    args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
-        return
-
-    auth = GDriveAuth(args.acctJson)
-    
-    if args.command == "backup": cmd_backup(args, auth)
-    elif args.command == "usage": cmd_usage(args, auth)
-    elif args.command == "navigate": cmd_navigate(args, auth)
-    elif args.command == "cron-setup": cmd_cron_setup()
-
 def cmd_cron_setup():
     print("\n--- Interactive Cron Setup ---")
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -340,6 +345,42 @@ def cmd_cron_setup():
     print("1. Copy the line above.")
     print("2. Run: crontab -e")
     print("3. Paste the line at the bottom and save.")
+
+# --- Main Entry ---
+
+def main():
+    parser = argparse.ArgumentParser(description="Mckodev GDrive SQL Tool")
+    parser.add_argument("--acctJson", default=DEFAULT_SERVICE_ACCOUNT_FILE, help="Path to service account JSON")
+    
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    
+    # Backup Command
+    p_backup = subparsers.add_parser("backup", help="Run database backup")
+    p_backup.add_argument("--db-user", default=DEFAULT_DB_USER)
+    p_backup.add_argument("--db-password", default=DEFAULT_DB_PASSWORD)
+    p_backup.add_argument("--backup-path", default=DEFAULT_BACKUP_PATH)
+    p_backup.add_argument("--gdrive-folder", default=DEFAULT_GDRIVE_FOLDER)
+    
+    # Usage Command
+    subparsers.add_parser("usage", help="Check GDrive quota usage")
+    
+    # Navigate Command
+    subparsers.add_parser("navigate", help="Interactive GDrive navigator")
+    
+    # Cron Setup Command
+    subparsers.add_parser("cron-setup", help="Interactive cron job generator")
+    
+    args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+        return
+
+    auth = GDriveAuth(args.acctJson)
+    
+    if args.command == "backup": cmd_backup(args, auth)
+    elif args.command == "usage": cmd_usage(args, auth)
+    elif args.command == "navigate": cmd_navigate(args, auth)
+    elif args.command == "cron-setup": cmd_cron_setup()
 
 if __name__ == "__main__":
     main()
