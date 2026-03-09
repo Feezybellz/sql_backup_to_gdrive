@@ -266,6 +266,14 @@ def cmd_backup(args, auth):
     parent_id = get_nested_folder(auth, args.gdrive_folder, "root")
     date_id = get_nested_folder(auth, datetime.now().strftime('%Y/%m/%d'), parent_id)
     
+    # Get skip list from env
+    env_skip_dbs = [d.strip() for d in os.getenv("SKIP_DATABASES", "").split(",") if d.strip()]
+    system_dbs = ["information_schema", "performance_schema", "mysql", "sys"]
+    skip_dbs = set(system_dbs + env_skip_dbs)
+    
+    # Get sleep settings from env
+    sleep_seconds = int(os.getenv("BACKUP_SLEEP_SECONDS", "5"))
+    
     with tempfile.NamedTemporaryFile(mode='w', delete=True) as cnf:
         cnf.write(f"[client]\nuser={args.db_user}\npassword=\"{args.db_password}\"\n")
         cnf.flush()
@@ -274,7 +282,10 @@ def cmd_backup(args, auth):
                              capture_output=True, text=True).stdout.splitlines()[1:]
         
         for db in dbs:
-            if db in ["information_schema", "performance_schema", "mysql", "sys"]: continue
+            if db in skip_dbs:
+                logging.info(f"Skipping: {db}")
+                continue
+            
             logging.info(f"Backing up: {db}")
             filepath = os.path.join(args.backup_path, f"{db}-{datetime.now().strftime('%Y%m%d%H%M')}.sql.gz")
             
@@ -283,13 +294,30 @@ def cmd_backup(args, auth):
                     dump_p = subprocess.Popen(["mysqldump", f"--defaults-extra-file={cnf.name}", db], stdout=subprocess.PIPE)
                     subprocess.run(["gzip"], stdin=dump_p.stdout, stdout=f)
                 
+                # Check file size for reporting
+                fsize = os.path.getsize(filepath)
+                logging.info(f"Uploading {db} ({format_size(fsize)})...")
+                
                 token = auth.get_access_token()
                 with open(filepath, "rb") as f:
-                    requests.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+                    res = requests.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
                                   headers={"Authorization": f"Bearer {token}"},
                                   files={"metadata": (None, json.dumps({"name": os.path.basename(filepath), "parents": [date_id]}), "application/json"),
-                                         "file": f})
+                                         "file": f},
+                                  timeout=300) # 5 minutes timeout
+                    
+                    if res.status_code != 200:
+                        logging.error(f"Upload failed for {db}: {res.text}")
+                
                 os.remove(filepath)
+                
+                # Rest between backups to manage resources
+                if sleep_seconds > 0:
+                    # If it was a large backup (> 50MB), maybe rest a bit longer
+                    actual_sleep = sleep_seconds * 2 if fsize > 50 * 1024 * 1024 else sleep_seconds
+                    logging.info(f"Resting for {actual_sleep}s...")
+                    time.sleep(actual_sleep)
+                    
             except Exception as e:
                 logging.error(f"Error during backup of {db}: {e}")
                 if os.path.exists(filepath): os.remove(filepath)
