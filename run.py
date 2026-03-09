@@ -324,11 +324,15 @@ def cmd_backup(args, auth):
     logging.info("Backup complete.")
 
 def cmd_cron_setup():
-    print("\n--- Interactive Cron Setup ---")
+    print("\n--- Robust Cron Setup ---")
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 1. Environment Detection
-    venv_python = os.path.join(current_dir, "venv", "bin", "python3")
+    venv_python = os.path.join(current_dir, ".venv", "bin", "python3")
+    if not os.path.exists(venv_python):
+        # Fallback to standard venv path if .venv doesn't exist
+        venv_python = os.path.join(current_dir, "venv", "bin", "python3")
+        
     use_venv = "n"
     if os.path.exists(venv_python):
         use_venv = input(f"Detected venv at {venv_python}. Use it? [Y/n]: ").strip().lower() or "y"
@@ -338,41 +342,72 @@ def cmd_cron_setup():
     # 2. Schedule Selection
     print("\nSelect Backup Schedule:")
     print("1) Daily (at a specific time)")
-    print("2) Every 12 Hours")
-    print("3) Every 6 Hours")
-    print("4) Weekly")
-    print("5) Custom Cron Expression")
+    print("2) Hourly (at the start of every hour)")
+    print("3) Every X Hours (interval)")
+    print("4) Every X Minutes (interval)")
+    print("5) Weekly (Sunday at Midnight)")
+    print("6) Custom Cron Expression")
     
-    choice = input("\nChoice [1-5]: ").strip()
+    choice = input("\nChoice [1-6]: ").strip()
     
-    schedule = "0 0 * * *" # Default daily midnight
+    schedule = "0 0 * * *" # Default
     
     if choice == "1":
-        time_str = input("At what time? (HH:MM, e.g. 02:30): ").strip() or "00:00"
+        print("Enter hours (0-23) separated by commas for multiple times, or a single time (HH:MM).")
+        time_input = input("Specific hours or HH:MM (e.g. '02:00,14:00' or just '2,14'): ").strip() or "00:00"
+        
         try:
-            h, m = time_str.split(":")
-            schedule = f"{int(m)} {int(h)} * * *"
+            if ":" in time_input and "," not in time_input:
+                # Single HH:MM format
+                h, m = map(int, time_input.split(":"))
+                schedule = f"{m} {h} * * *"
+            else:
+                # Multiple hours or list of times
+                parts = [p.strip() for p in time_input.split(",")]
+                hours = []
+                minute = "0"
+                for p in parts:
+                    if ":" in p:
+                        h, m = map(int, p.split(":"))
+                        hours.append(str(h))
+                        minute = str(m) # Uses the minute from the last entry or assumes they share one
+                    else:
+                        hours.append(str(int(p)))
+                
+                hour_str = ",".join(sorted(list(set(hours))))
+                schedule = f"{minute} {hour_str} * * *"
         except:
-            print("Invalid format, defaulting to midnight.")
-    elif choice == "2": schedule = "0 */12 * * *"
-    elif choice == "3": schedule = "0 */6 * * *"
-    elif choice == "4": schedule = "0 0 * * 0"
+            print("Invalid format, defaulting to 00:00 (Midnight).")
+            schedule = "0 0 * * *"
+    elif choice == "2":
+        schedule = "0 * * * *"
+    elif choice == "3":
+        hours = input("Every how many hours? (1-23): ").strip() or "12"
+        schedule = f"0 */{hours} * * *"
+    elif choice == "4":
+        mins = input("Every how many minutes? (1-59): ").strip() or "30"
+        schedule = f"*/{mins} * * * *"
     elif choice == "5":
-        schedule = input("Enter custom cron (e.g. '*/30 * * * *'): ").strip()
+        schedule = "0 0 * * 0"
+    elif choice == "6":
+        schedule = input("Enter custom cron (e.g. '0 2,14 * * *'): ").strip()
     
     # 3. Generate Command
     log_path = os.path.join(current_dir, "logs", "cron.log")
     full_cmd = f"{schedule} cd {current_dir} && {python_path} run.py backup >> {log_path} 2>&1"
     
     print("\n" + "="*80)
-    print(" YOUR CRONTAB COMMAND:")
+    print(" GENERATED CRONTAB LINE:")
     print("="*80)
     print(full_cmd)
     print("="*80)
-    print("\nTo install this:")
+    print("\nHow to install:")
     print("1. Copy the line above.")
     print("2. Run: crontab -e")
-    print("3. Paste the line at the bottom and save.")
+    print("3. If it's your first time, choose 'nano' (usually option 1).")
+    print("4. Scroll to the very bottom and paste the line.")
+    print("5. Press Ctrl+O then Enter to save, and Ctrl+X to exit.")
+    print("6. Verify with: crontab -l")
 
 # --- Main Entry ---
 
