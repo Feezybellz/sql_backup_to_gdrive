@@ -52,7 +52,8 @@ Create a `.env` file in the project root to set your persistent defaults:
 ```ini
 DB_USER=root
 DB_PASSWORD=YourSecurePassword
-BACKUP_PATH=/path/to/local/backups
+BACKUP_PATH=/path/to/temp/backups
+LOCAL_BACKUP_PATH=/path/to/persistent/backups
 SERVICE_ACCOUNT_FILE=acct.json
 PARENT_GDRIVE_FOLDER_NAME=mckodev/backups
 EMAILS_TO_SHARE=admin@example.com
@@ -79,7 +80,9 @@ Performs a full dump of all non-system databases, compresses them, and uploads t
 | :--- | :--- | :--- |
 | `--db-user` | `root` (or .env) | MySQL username. |
 | `--db-password` | `Password` (or .env)| MySQL password. |
-| `--backup-path` | `backups/` (local) | Where to store temporary `.sql.gz` files. |
+| `--backup-path` | `backups/` (local) | Temporary folder for `.sql.gz` files before upload. |
+| `--local` | `None` (or .env) | Persistent local backup path (saves in YYYY/MM/DD format). |
+| `--no-gdrive` | `False` | Skip Google Drive upload (use with --local for local-only). |
 | `--gdrive-folder`| `mckodev/...` | The root folder name in Google Drive. |
 
 **Example Usage:**

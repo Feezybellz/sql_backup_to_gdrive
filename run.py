@@ -10,6 +10,7 @@ import tempfile
 import argparse
 import math
 import sys
+import shutil
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -22,6 +23,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DB_USER = os.getenv("DB_USER", "root")
 DEFAULT_DB_PASSWORD = os.getenv("DB_PASSWORD", "Password")
 DEFAULT_BACKUP_PATH = os.getenv("BACKUP_PATH", os.path.join(current_dir, "backups"))
+DEFAULT_LOCAL_BACKUP_PATH = os.getenv("LOCAL_BACKUP_PATH", None)
 DEFAULT_SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", os.path.join(current_dir, "acct.json"))
 DEFAULT_GDRIVE_FOLDER = os.getenv("PARENT_GDRIVE_FOLDER_NAME", "mckodev/mckodev_server_db")
 DEFAULT_EMAILS = [e.strip() for e in os.getenv("EMAILS_TO_SHARE", "").split(",") if e.strip()]
@@ -259,12 +261,19 @@ def cmd_navigate(args, auth):
                 input("Press Enter to continue...")
 
 def cmd_backup(args, auth):
+    if not args.local and args.no_gdrive:
+        logging.error("No backup destination selected. Provide a --local path or remove --no-gdrive.")
+        return
+
     logging.info("Backup started.")
-    # Ensure backup path exists
+    # Ensure temporary backup path exists
     os.makedirs(args.backup_path, exist_ok=True)
     
-    parent_id = get_nested_folder(auth, args.gdrive_folder, "root")
-    date_id = get_nested_folder(auth, datetime.now().strftime('%Y/%m/%d'), parent_id)
+    date_path = datetime.now().strftime('%Y/%m/%d')
+    date_id = None
+    if not args.no_gdrive:
+        parent_id = get_nested_folder(auth, args.gdrive_folder, "root")
+        date_id = get_nested_folder(auth, date_path, parent_id)
     
     # Get skip list from env
     env_skip_dbs = [d.strip() for d in os.getenv("SKIP_DATABASES", "").split(",") if d.strip()]
@@ -296,24 +305,31 @@ def cmd_backup(args, auth):
                 
                 # Check file size for reporting
                 fsize = os.path.getsize(filepath)
-                logging.info(f"Uploading {db} ({format_size(fsize)})...")
                 
-                token = auth.get_access_token()
-                with open(filepath, "rb") as f:
-                    res = requests.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-                                  headers={"Authorization": f"Bearer {token}"},
-                                  files={"metadata": (None, json.dumps({"name": os.path.basename(filepath), "parents": [date_id]}), "application/json"),
-                                         "file": f},
-                                  timeout=300) # 5 minutes timeout
-                    
-                    if res.status_code != 200:
-                        logging.error(f"Upload failed for {db}: {res.text}")
+                # Persistent Local Backup (Structured)
+                if args.local:
+                    local_dir = os.path.join(args.local, date_path)
+                    os.makedirs(local_dir, exist_ok=True)
+                    shutil.copy2(filepath, os.path.join(local_dir, os.path.basename(filepath)))
+                    logging.info(f"Local backup saved: {local_dir}")
+
+                if not args.no_gdrive:
+                    logging.info(f"Uploading {db} ({format_size(fsize)})...")
+                    token = auth.get_access_token()
+                    with open(filepath, "rb") as f:
+                        res = requests.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+                                    headers={"Authorization": f"Bearer {token}"},
+                                    files={"metadata": (None, json.dumps({"name": os.path.basename(filepath), "parents": [date_id]}), "application/json"),
+                                            "file": f},
+                                    timeout=300) # 5 minutes timeout
+                        
+                        if res.status_code != 200:
+                            logging.error(f"Upload failed for {db}: {res.text}")
                 
                 os.remove(filepath)
                 
                 # Rest between backups to manage resources
                 if sleep_seconds > 0:
-                    # If it was a large backup (> 50MB), maybe rest a bit longer
                     actual_sleep = sleep_seconds * 2 if fsize > 50 * 1024 * 1024 else sleep_seconds
                     logging.info(f"Resting for {actual_sleep}s...")
                     time.sleep(actual_sleep)
@@ -422,6 +438,8 @@ def main():
     p_backup.add_argument("--db-user", default=DEFAULT_DB_USER)
     p_backup.add_argument("--db-password", default=DEFAULT_DB_PASSWORD)
     p_backup.add_argument("--backup-path", default=DEFAULT_BACKUP_PATH)
+    p_backup.add_argument("--local", default=DEFAULT_LOCAL_BACKUP_PATH, help="Persistent local backup path")
+    p_backup.add_argument("--no-gdrive", action="store_true", help="Skip Google Drive upload")
     p_backup.add_argument("--gdrive-folder", default=DEFAULT_GDRIVE_FOLDER)
     
     # Usage Command
